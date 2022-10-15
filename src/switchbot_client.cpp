@@ -33,33 +33,51 @@ SwitchBotClient::SwitchBotClient(const char *peer_address) {
 }
 
 typedef struct {
-	NimbleCentral * central;
-	const ble_uuid_t * service;
-	const ble_uuid_t * characteristic;
-	const uint8_t * command;
+	const ble_addr_t *address;
+	NimbleCentral *central;
+	const ble_uuid_t *service;
+	const ble_uuid_t *characteristic;
+	const uint8_t *command;
 	size_t length;
+	NimbleCallback disconnecting;
+	NimbleCallback connecting;
+	NimbleCallback writing;
 } callback_args_t;
 
 int SwitchBotClient::send(const uint8_t *command, size_t length) {
-	callback_args_t * args = new callback_args_t();
-	args->central = central;
-	args->service = (const ble_uuid_t *)&service;
-	args->characteristic = (const ble_uuid_t *)&characteristic;
-	args->command = command;
-	args->length = length;
+	callback_args_t *args = new callback_args_t();
+	args->address		  = &address;
+	args->central		  = central;
+	args->service		  = (const ble_uuid_t *)&service;
+	args->characteristic  = (const ble_uuid_t *)&characteristic;
+	args->command		  = command;
+	args->length		  = length;
 
 	ESP_LOGI(tag, "start connect");
-	central->connect(&address, [](uint16_t handle, void* args) {
-		ESP_LOGI(tag, "connected, start write");
-		callback_args_t * arg = (callback_args_t *)args;
-		arg->central->write(handle, arg->service, arg->characteristic, arg->command, arg->length, 10000, [](uint16_t handle, void* args) {
-			ESP_LOGI(tag, "written, disconnecting");
-			callback_args_t * arg = (callback_args_t *)args;
-			arg->central->disconnect(handle, nullptr, nullptr);
-			return 0;
-		}, args);
+
+	args->disconnecting = [](uint16_t handle, void *args) {
+		ESP_LOGI(tag, "written, disconnecting");
+		callback_args_t *arg = (callback_args_t *)args;
+		arg->central->disconnect(handle, nullptr, nullptr);
 		return 0;
-	}, args);
+	};
+
+	args->connecting = [](uint16_t handle, void *args) {
+		ESP_LOGI(tag, "reconnecting, start write");
+		callback_args_t *arg = (callback_args_t *)args;
+		arg->central->connect(arg->address, arg->writing, args);
+		return 0;
+	};
+
+	args->writing = [](uint16_t handle, void *args) {
+		ESP_LOGI(tag, "connected, start write");
+		callback_args_t *arg = (callback_args_t *)args;
+		arg->central->write(handle, arg->service, arg->characteristic, arg->command, arg->length, 10000,
+						arg->disconnecting, arg->connecting, args);
+		return 0;
+	};
+
+	args->connecting(0, args);
 
 	return 0;
 }

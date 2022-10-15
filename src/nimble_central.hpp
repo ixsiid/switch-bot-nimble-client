@@ -30,5 +30,5 @@ class NimbleCentral {
 	static int write(uint16_t handle,
 				  const ble_uuid_t *service, const ble_uuid_t *characteristic,
 				  const uint8_t *value, size_t length, int timeout,
-				  NimbleCallback callback, void *arg);
+				  NimbleCallback success, NimbleCallback failed, void *arg);
 };

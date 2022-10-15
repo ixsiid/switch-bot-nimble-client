@@ -102,7 +102,7 @@ void NimbleCentral::blecent_scan() {
 
 typedef struct {
 	NimbleCallback callback;
-	void * param;
+	void *param;
 } callback_t;
 
 /**
@@ -142,7 +142,7 @@ int NimbleCentral::blecent_gap_event(struct ble_gap_event *event, void *arg) {
 				print_conn_desc(&desc);
 				MODLOG_DFLT(INFO, "\n");
 
-				callback_t * cb = (callback_t *)arg;
+				callback_t *cb = (callback_t *)arg;
 				ESP_LOGI(tag, "callback function by connect: %d, %p, %p, %p", event->connect.conn_handle, cb, cb->callback, cb->param);
 				if (cb->callback == nullptr) return 0;
 				cb->callback(event->connect.conn_handle, cb->param);
@@ -224,7 +224,7 @@ int NimbleCentral::blecent_gap_event(struct ble_gap_event *event, void *arg) {
 	}
 }
 
-int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback, void*args) {
+int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback, void *args) {
 	int rc;
 	/* Scanning must be stopped before a connection can be initiated. */
 	rc = ble_gap_disc_cancel();
@@ -234,8 +234,8 @@ int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback, v
 	}
 
 	callback_t *cb = new callback_t();
-	cb->callback = callback;
-	cb->param = args;
+	cb->callback	= callback;
+	cb->param		= args;
 
 	// BLE通信安定化のためにWaitを挿入
 	// https://github.com/espressif/esp-idf/issues/5105#issuecomment-844641580
@@ -247,7 +247,7 @@ int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback, v
 	return rc;
 }
 
-int NimbleCentral::disconnect(uint16_t handle, NimbleCallback callback, void*args) {
+int NimbleCentral::disconnect(uint16_t handle, NimbleCallback callback, void *args) {
 	int rc;
 
 	rc = ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
@@ -259,7 +259,8 @@ int NimbleCentral::disconnect(uint16_t handle, NimbleCallback callback, void*arg
 }
 
 typedef struct {
-	NimbleCallback callback;
+	NimbleCallback callback_success;
+	NimbleCallback callback_failed;
 	const ble_uuid_t *service;
 	const ble_uuid_t *characteristic;
 	bool found_service;
@@ -282,7 +283,7 @@ int NimbleCentral::chr_disced(uint16_t conn_handle, const struct ble_gatt_error 
 			client->found_characteristic = true;
 
 			rc = ble_gattc_write_no_rsp_flat(conn_handle, chr->val_handle, client->value, client->length);
-			if (client->callback != nullptr) rc = client->callback(conn_handle, client->param);
+			if (client->callback_success != nullptr) rc = client->callback_success(conn_handle, client->param);
 			break;
 
 		case BLE_HS_EALREADY:
@@ -299,6 +300,7 @@ int NimbleCentral::chr_disced(uint16_t conn_handle, const struct ble_gatt_error 
 
 	if (rc != 0 && !client->found_characteristic) {
 		ESP_LOGE(tag, "Failed find chr or write characteristic");
+		if (client->callback_failed != nullptr) client->callback_failed(conn_handle, client->param);
 	}
 
 	ESP_LOGI(tag, "Finish cmd press");
@@ -329,6 +331,7 @@ int NimbleCentral::svc_disced(uint16_t conn_handle, const struct ble_gatt_error 
 			} else {
 				ESP_LOGE(tag, "Couldn't find service uuid.");
 				ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+				if (client->callback_failed != nullptr) client->callback_failed(conn_handle, client->param);
 				rc = error->status;
 				delete arg;
 			}
@@ -349,10 +352,11 @@ int NimbleCentral::svc_disced(uint16_t conn_handle, const struct ble_gatt_error 
 int NimbleCentral::write(uint16_t handle,
 					const ble_uuid_t *service, const ble_uuid_t *characteristic,
 					const uint8_t *value, size_t length, int timeout,
-					NimbleCallback callback, void *args) {
+					NimbleCallback success, NimbleCallback failed, void *args) {
 	int rc;
 	gattc_callback_args_t *arg = new gattc_callback_args_t();
-	arg->callback			  = callback;
+	arg->callback_success	  = success;
+	arg->callback_failed	  = failed;
 	arg->service			  = service;
 	arg->characteristic		  = characteristic;
 	arg->found_service		  = false;
