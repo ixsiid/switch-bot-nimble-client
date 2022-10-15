@@ -19,6 +19,7 @@ typedef struct {
 bool NimbleCentral::is_started = false;
 
 int NimbleCentral::start(const char *device_name) {
+	ESP_LOGI(tag, "start");
 	if (is_started) return 0;
 
 	int rc;
@@ -33,12 +34,11 @@ int NimbleCentral::start(const char *device_name) {
 
 	/* Set the default device name. */
 	rc = ble_svc_gap_device_name_set(device_name);
-	return rc;
 
 	nimble_port_freertos_init(blecent_host_task);
 
 	is_started = true;
-
+	ESP_LOGI(tag, "started");
 	return 0;
 }
 
@@ -100,6 +100,11 @@ void NimbleCentral::blecent_scan() {
 	}
 }
 
+typedef struct {
+	NimbleCallback callback;
+	void * param;
+} callback_t;
+
 /**
  * The nimble host executes this callback when a GAP event occurs.  The
  * application associates a GAP event callback with each connection that is
@@ -129,17 +134,19 @@ int NimbleCentral::blecent_gap_event(struct ble_gap_event *event, void *arg) {
 			/* A new connection was established or a connection attempt failed. */
 			if (event->connect.status == 0) {
 				/* Connection successfully established. */
-				MODLOG_DFLT(INFO, "Connection established ");
 				ESP_LOGI(tag, "Connect");
+				MODLOG_DFLT(INFO, "Connection established ");
 
 				rc = ble_gap_conn_find(event->connect.conn_handle, &desc);
 				assert(rc == 0);
 				print_conn_desc(&desc);
 				MODLOG_DFLT(INFO, "\n");
 
-				NimbleCallback callback = (NimbleCallback)arg;
-				if (callback == nullptr) return 0;
-				callback(event->connect.conn_handle);
+				callback_t * cb = (callback_t *)arg;
+				ESP_LOGI(tag, "callback function by connect: %d, %p, %p, %p", event->connect.conn_handle, cb, cb->callback, cb->param);
+				if (cb->callback == nullptr) return 0;
+				cb->callback(event->connect.conn_handle, cb->param);
+				delete arg;
 
 				return 0;
 			} else {
@@ -217,7 +224,7 @@ int NimbleCentral::blecent_gap_event(struct ble_gap_event *event, void *arg) {
 	}
 }
 
-int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback) {
+int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback, void*args) {
 	int rc;
 	/* Scanning must be stopped before a connection can be initiated. */
 	rc = ble_gap_disc_cancel();
@@ -226,21 +233,27 @@ int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback) {
 		return rc;
 	}
 
+	callback_t *cb = new callback_t();
+	cb->callback = callback;
+	cb->param = args;
+
 	// BLE通信安定化のためにWaitを挿入
 	// https://github.com/espressif/esp-idf/issues/5105#issuecomment-844641580
 	vTaskDelay(100 / portTICK_PERIOD_MS);
-	rc = ble_gap_connect(0, address, 4000, nullptr, blecent_gap_event, (void *)callback);
+
+	ESP_LOGI(tag, "connect args: %p, %p, %p", cb, cb->callback, cb->param);
+	rc = ble_gap_connect(0, address, 4000, nullptr, blecent_gap_event, cb);
 
 	return rc;
 }
 
-int NimbleCentral::disconnect(uint16_t handle, NimbleCallback callback) {
+int NimbleCentral::disconnect(uint16_t handle, NimbleCallback callback, void*args) {
 	int rc;
 
 	rc = ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
 	ESP_LOGI(tag, "Connection terminate");
 
-	if (callback != nullptr) callback(0);
+	if (callback != nullptr) callback(0, args);
 
 	return rc;
 }
@@ -253,6 +266,7 @@ typedef struct {
 	bool found_characteristic;
 	const uint8_t *value;
 	size_t length;
+	void *param;
 } gattc_callback_args_t;
 
 int NimbleCentral::chr_disced(uint16_t conn_handle, const struct ble_gatt_error *error,
@@ -266,8 +280,9 @@ int NimbleCentral::chr_disced(uint16_t conn_handle, const struct ble_gatt_error 
 	switch (error->status) {
 		case 0:
 			client->found_characteristic = true;
-			rc					    = ble_gattc_write_no_rsp_flat(conn_handle, chr->val_handle, client->value, client->length);
-			if (client->callback != nullptr) rc = client->callback(conn_handle);
+
+			rc = ble_gattc_write_no_rsp_flat(conn_handle, chr->val_handle, client->value, client->length);
+			if (client->callback != nullptr) rc = client->callback(conn_handle, client->param);
 			break;
 
 		case BLE_HS_EALREADY:
@@ -277,6 +292,7 @@ int NimbleCentral::chr_disced(uint16_t conn_handle, const struct ble_gatt_error 
 			rc = error->status;
 
 			ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+			delete arg;
 			ESP_LOGI(tag, "Connection terminate");
 			break;
 	}
@@ -301,8 +317,9 @@ int NimbleCentral::svc_disced(uint16_t conn_handle, const struct ble_gatt_error 
 	switch (error->status) {
 		case 0:  // Success
 			client->found_service = true;
-			rc				  = ble_gattc_disc_chrs_by_uuid(conn_handle, service->start_handle, service->end_handle,
-													  client->characteristic, chr_disced, client);
+
+			rc = ble_gattc_disc_chrs_by_uuid(conn_handle, service->start_handle, service->end_handle,
+									   client->characteristic, chr_disced, client);
 			break;
 
 		case BLE_HS_EDONE:
@@ -313,6 +330,7 @@ int NimbleCentral::svc_disced(uint16_t conn_handle, const struct ble_gatt_error 
 				ESP_LOGE(tag, "Couldn't find service uuid.");
 				ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 				rc = error->status;
+				delete arg;
 			}
 			break;
 
@@ -330,7 +348,8 @@ int NimbleCentral::svc_disced(uint16_t conn_handle, const struct ble_gatt_error 
 
 int NimbleCentral::write(uint16_t handle,
 					const ble_uuid_t *service, const ble_uuid_t *characteristic,
-					const uint8_t *value, size_t length, int timeout, NimbleCallback callback) {
+					const uint8_t *value, size_t length, int timeout,
+					NimbleCallback callback, void *args) {
 	int rc;
 	gattc_callback_args_t *arg = new gattc_callback_args_t();
 	arg->callback			  = callback;
@@ -340,12 +359,13 @@ int NimbleCentral::write(uint16_t handle,
 	arg->found_characteristic  = false;
 	arg->value			  = value;
 	arg->length			  = length;
+	arg->param			  = args;
 
 	rc = ble_gattc_disc_svc_by_uuid(handle, service, svc_disced, arg);
 
 	if (rc != 0) {
 		ESP_LOGI(tag, "Failed find characteristics");
 	}
-	
+
 	return rc;
 }
