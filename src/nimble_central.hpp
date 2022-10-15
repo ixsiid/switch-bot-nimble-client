@@ -1,5 +1,12 @@
+#pragma once
+// #include <functional>
+ 
 #include <nimble/ble.h>
 #include <host/ble_uuid.h>
+
+// typedef std::function<int(uint16_t)> NimbleCallback;
+
+typedef int (*NimbleCallback)(uint16_t) ;
 
 class NimbleCentral {
 private:
@@ -9,12 +16,18 @@ private:
 	static void blecent_on_sync();
 	static void blecent_host_task(void *param);
 	static void blecent_scan();
+
+	static int chr_disced(uint16_t conn_handle, const struct ble_gatt_error *error,
+						const struct ble_gatt_chr *chr, void *arg);
+	static int svc_disced(uint16_t conn_handle, const struct ble_gatt_error *error,
+						const struct ble_gatt_svc *svc, void *arg);
+
 	static int blecent_gap_event(struct ble_gap_event *event, void *arg);
 public:
-	static int start();
-	static int connect(ble_addr_t address, uint16_t& out_handle);
-	static int disconnect(uint16_t handle);
+	static int start(const char * device_name);
+	static int connect(const ble_addr_t * address, NimbleCallback callback);
+	static int disconnect(uint16_t handle, NimbleCallback callback);
 	static int write(uint16_t handle,
-		ble_uuid_t service, ble_uuid_t characteristic,
-		const uint8_t * value, size_t length, int timeout = 10000);
+		const ble_uuid_t * service, const ble_uuid_t * characteristic,
+		const uint8_t * value, size_t length, int timeout, NimbleCallback callback);
 };

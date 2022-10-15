@@ -1,12 +1,24 @@
+#include <esp_log.h>
+#include <nvs_flash.h>
+#include <host/ble_gap.h>
+#include <services/gap/ble_svc_gap.h>
+#include <nimble/nimble_port_freertos.h>
+#include <nimble/nimble_port.h>
+#include <esp_nimble_hci.h>
+#include <host/util/util.h>
+
+#include "misc.h"
+
 #include "nimble_central.hpp"
 
-typedef struct {
+const char *tag = "NimBleCentral";
 
+typedef struct {
 } callback_args_t;
 
 bool NimbleCentral::is_started = false;
 
-int NimbleCentral::start(const char * device_name) {
+int NimbleCentral::start(const char *device_name) {
 	if (is_started) return 0;
 
 	int rc;
@@ -25,7 +37,7 @@ int NimbleCentral::start(const char * device_name) {
 
 	nimble_port_freertos_init(blecent_host_task);
 
-	is_nimble_started = true;
+	is_started = true;
 
 	return 0;
 }
@@ -52,8 +64,6 @@ void NimbleCentral::blecent_host_task(void *param) {
 
 	nimble_port_freertos_deinit();
 }
-
-
 
 void NimbleCentral::blecent_scan() {
 	uint8_t own_addr_type;
@@ -86,12 +96,9 @@ void NimbleCentral::blecent_scan() {
 
 	rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &disc_params, blecent_gap_event, nullptr);
 	if (rc != 0) {
-		MODLOG_DFLT(ERROR, "Error initiating GAP discovery procedure; rc=%d\n",
-				  rc);
+		MODLOG_DFLT(ERROR, "Error initiating GAP discovery procedure; rc=%d\n", rc);
 	}
 }
-
-
 
 /**
  * The nimble host executes this callback when a GAP event occurs.  The
@@ -130,13 +137,9 @@ int NimbleCentral::blecent_gap_event(struct ble_gap_event *event, void *arg) {
 				print_conn_desc(&desc);
 				MODLOG_DFLT(INFO, "\n");
 
-				// 自前Chr検索
-				uint16_t handle = event->connect.conn_handle;
-				rc			 = ble_gattc_disc_svc_by_uuid(handle, (const ble_uuid_t *)&client->service, svc_disced, arg);
-				if (rc != 0) {
-					ESP_LOGI(tag, "Failed find characteristics");
-					return rc;
-				}
+				NimbleCallback callback = (NimbleCallback)arg;
+				if (callback == nullptr) return 0;
+				callback(event->connect.conn_handle);
 
 				return 0;
 			} else {
@@ -212,4 +215,137 @@ int NimbleCentral::blecent_gap_event(struct ble_gap_event *event, void *arg) {
 		default:
 			return 0;
 	}
+}
+
+int NimbleCentral::connect(const ble_addr_t *address, NimbleCallback callback) {
+	int rc;
+	/* Scanning must be stopped before a connection can be initiated. */
+	rc = ble_gap_disc_cancel();
+	if (rc != 0) {
+		MODLOG_DFLT(DEBUG, "Failed to cancel scan; rc=%d\n", rc);
+		return rc;
+	}
+
+	// BLE通信安定化のためにWaitを挿入
+	// https://github.com/espressif/esp-idf/issues/5105#issuecomment-844641580
+	vTaskDelay(100 / portTICK_PERIOD_MS);
+	rc = ble_gap_connect(0, address, 4000, nullptr, blecent_gap_event, (void *)callback);
+
+	return rc;
+}
+
+int NimbleCentral::disconnect(uint16_t handle, NimbleCallback callback) {
+	int rc;
+
+	rc = ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+	ESP_LOGI(tag, "Connection terminate");
+
+	if (callback != nullptr) callback(0);
+
+	return rc;
+}
+
+typedef struct {
+	NimbleCallback callback;
+	const ble_uuid_t *service;
+	const ble_uuid_t *characteristic;
+	bool found_service;
+	bool found_characteristic;
+	const uint8_t *value;
+	size_t length;
+} gattc_callback_args_t;
+
+int NimbleCentral::chr_disced(uint16_t conn_handle, const struct ble_gatt_error *error,
+						const struct ble_gatt_chr *chr, void *arg) {
+	int rc;
+
+	ESP_LOGI(tag, "chara event status: %d", error->status);
+
+	gattc_callback_args_t *client = (gattc_callback_args_t *)arg;
+
+	switch (error->status) {
+		case 0:
+			client->found_characteristic = true;
+			rc					    = ble_gattc_write_no_rsp_flat(conn_handle, chr->val_handle, client->value, client->length);
+			if (client->callback != nullptr) rc = client->callback(conn_handle);
+			break;
+
+		case BLE_HS_EALREADY:
+		case BLE_HS_EBUSY:
+		case BLE_HS_EDONE:
+		default:
+			rc = error->status;
+
+			ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+			ESP_LOGI(tag, "Connection terminate");
+			break;
+	}
+
+	if (rc != 0 && !client->found_characteristic) {
+		ESP_LOGE(tag, "Failed find chr or write characteristic");
+	}
+
+	ESP_LOGI(tag, "Finish cmd press");
+
+	return rc;
+}
+
+int NimbleCentral::svc_disced(uint16_t conn_handle, const struct ble_gatt_error *error,
+						const struct ble_gatt_svc *service, void *arg) {
+	int rc;
+
+	ESP_LOGI(tag, "service event status: %d", error->status);
+
+	gattc_callback_args_t *client = (gattc_callback_args_t *)arg;
+
+	switch (error->status) {
+		case 0:  // Success
+			client->found_service = true;
+			rc				  = ble_gattc_disc_chrs_by_uuid(conn_handle, service->start_handle, service->end_handle,
+													  client->characteristic, chr_disced, client);
+			break;
+
+		case BLE_HS_EDONE:
+			if (client->found_service) {
+				ESP_LOGI(tag, "Finding service finish.");
+				rc = 0;
+			} else {
+				ESP_LOGE(tag, "Couldn't find service uuid.");
+				ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+				rc = error->status;
+			}
+			break;
+
+		default:
+			rc = error->status;
+			break;
+	}
+
+	if (rc != 0) {
+		ESP_LOGE(tag, "Service discover error: %d", rc);
+	}
+
+	return rc;
+}
+
+int NimbleCentral::write(uint16_t handle,
+					const ble_uuid_t *service, const ble_uuid_t *characteristic,
+					const uint8_t *value, size_t length, int timeout, NimbleCallback callback) {
+	int rc;
+	gattc_callback_args_t *arg = new gattc_callback_args_t();
+	arg->callback			  = callback;
+	arg->service			  = service;
+	arg->characteristic		  = characteristic;
+	arg->found_service		  = false;
+	arg->found_characteristic  = false;
+	arg->value			  = value;
+	arg->length			  = length;
+
+	rc = ble_gattc_disc_svc_by_uuid(handle, service, svc_disced, arg);
+
+	if (rc != 0) {
+		ESP_LOGI(tag, "Failed find characteristics");
+	}
+	
+	return rc;
 }
