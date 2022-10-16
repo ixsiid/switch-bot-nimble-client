@@ -1,14 +1,8 @@
 #pragma once
 
-#define min
-#define max
-
 #include <nimble/ble.h>
 #include <host/ble_uuid.h>
 #include "nimble_central.hpp"
-
-#undef min
-#undef max
 
 class SwitchBotClient {
 private:

@@ -1,13 +1,7 @@
 #pragma once
 
-#define min
-#define max
-
 #include <nimble/ble.h>
 #include <host/ble_uuid.h>
-
-#undef min
-#undef max
 
 // typedef std::function<int(uint16_t, void*)> NimbleCallback;
 

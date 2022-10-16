@@ -18,8 +18,8 @@ const ble_uuid128_t SwitchBotClient::characteristic = {
 };
 
 const uint8_t SwitchBotClient::command_press[3] = {0x57, 0x01, 0x00};
-const uint8_t SwitchBotClient::command_push[3]  = {0x57, 0x01, 0x01};
-const uint8_t SwitchBotClient::command_pull[3]  = {0x57, 0x01, 0x02};
+const uint8_t SwitchBotClient::command_push[3]  = {0x57, 0x01, 0x03};
+const uint8_t SwitchBotClient::command_pull[3]  = {0x57, 0x01, 0x04};
 
 SwitchBotClient::SwitchBotClient(const char *peer_address) {
 	address.type = BLE_ADDR_RANDOM;

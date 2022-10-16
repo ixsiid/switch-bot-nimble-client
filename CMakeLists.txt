@@ -8,5 +8,5 @@ file(GLOB SRCS
 set(COMPONENT_SRCS ${SRCS})
 set(COMPONENT_REQUIRES nvs_flash bt)
 
-register_component()
 
+register_component()
