@@ -1,11 +1,18 @@
 #include <esp_log.h>
 #include <nvs_flash.h>
+
+#define min
+#define max
+
 #include <host/ble_gap.h>
 #include <services/gap/ble_svc_gap.h>
 #include <nimble/nimble_port_freertos.h>
 #include <nimble/nimble_port.h>
 #include <esp_nimble_hci.h>
 #include <host/util/util.h>
+
+#undef min
+#undef max
 
 #include "misc.h"
 
@@ -24,7 +31,8 @@ int NimbleCentral::start(const char *device_name) {
 
 	int rc;
 
-	ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init());
+	// esp-idf 5.0では削除
+	// ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init());
 
 	nimble_port_init();
 	/* Configure the host. */
