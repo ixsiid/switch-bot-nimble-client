@@ -63,7 +63,7 @@ int SwitchBotClient::send(const uint8_t *command, size_t length) {
 	};
 
 	args->connecting = [](uint16_t handle, void *args) {
-		ESP_LOGI(tag, "reconnecting, start write");
+		ESP_LOGI(tag, "start connecting");
 		callback_args_t *arg = (callback_args_t *)args;
 		arg->central->connect(arg->address, arg->writing, args);
 		return 0;
