@@ -6,7 +6,7 @@ file(GLOB SRCS
 	src/*.c
      )
 set(COMPONENT_SRCS ${SRCS})
-set(COMPONENT_REQUIRES bt)
+set(COMPONENT_REQUIRES nvs_flash bt)
+
 
 register_component()
-
