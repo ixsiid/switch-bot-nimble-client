@@ -5,7 +5,21 @@
 
 // typedef std::function<int(uint16_t, void*)> NimbleCallback;
 
-typedef int (*NimbleCallback)(uint16_t, void*);
+enum class NimbleCallbackReason {
+	UNKNOWN = 0,
+	SUCCESS,
+	CHARACTERISTIC_WRITE_FAILED,
+	CHARACTERISTIC_FIND_FAILED,
+	SERVICE_FIND_FAILED,
+	STOP_CANCEL_FAILED,
+	CONNECTION_FAILED,
+	OTHER_FAILED,
+	// 途中経過
+	CONNECTION_START,
+	CONNECTION_ESTABLISHED,
+};
+
+typedef int (*NimbleCallback)(uint16_t, NimbleCallbackReason);
 
 class NimbleCentral {
     private:
@@ -25,10 +39,10 @@ class NimbleCentral {
 
     public:
 	static int start(const char *device_name);
-	static int connect(const ble_addr_t *address, NimbleCallback callback, void *arg);
-	static int disconnect(uint16_t handle, NimbleCallback callback, void *arg);
+	static int connect(const ble_addr_t *address, NimbleCallback callback);
+	static int disconnect(uint16_t handle, NimbleCallback callback);
 	static int write(uint16_t handle,
 				  const ble_uuid_t *service, const ble_uuid_t *characteristic,
 				  const uint8_t *value, size_t length, int timeout,
-				  NimbleCallback success, NimbleCallback failed, void *arg);
+				  NimbleCallback callback);
 };
