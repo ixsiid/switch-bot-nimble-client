@@ -45,10 +45,14 @@ typedef struct {
 } callback_args_t;
 
 int SwitchBotClient::send(const uint8_t *command, size_t length) {
-	return 0;
-}
-/*
-	callback_args_t *args = new callback_args_t();
+	static callback_args_t *args = nullptr;
+
+	if (args != nullptr) {
+		ESP_LOGI(tag, "busy");
+		return 1;
+	}
+
+	args = new callback_args_t();
 	args->address		  = &address;
 	args->central		  = central;
 	args->service		  = (const ble_uuid_t *)&service;
@@ -58,33 +62,41 @@ int SwitchBotClient::send(const uint8_t *command, size_t length) {
 
 	ESP_LOGI(tag, "start connect");
 
-	args->disconnecting = [](uint16_t handle, void *args) {
-		ESP_LOGI(tag, "written, disconnecting");
-		callback_args_t *arg = (callback_args_t *)args;
-		arg->central->disconnect(handle, nullptr, nullptr);
+	args->callback = [](uint16_t handle, NimbleCallbackReason reason) {
+		switch(reason) {
+			case NimbleCallbackReason::SUCCESS:
+				ESP_LOGI(tag, "command write success");
+				delete args;
+				args = nullptr;
+				break;
+			case NimbleCallbackReason::CONNECTION_START:
+			case NimbleCallbackReason::CHARACTERISTIC_WRITE_FAILED:
+			case NimbleCallbackReason::CHARACTERISTIC_FIND_FAILED:
+			case NimbleCallbackReason::SERVICE_FIND_FAILED:
+			case NimbleCallbackReason::STOP_CANCEL_FAILED:
+			case NimbleCallbackReason::CONNECTION_FAILED:
+			case NimbleCallbackReason::OTHER_FAILED:
+				ESP_LOGI(tag, "command failed");
+				delete args;
+				args = nullptr;
+				break;
+			case NimbleCallbackReason::CONNECTION_ESTABLISHED:
+				ESP_LOGI(tag, "connected, start write");
+				args->central->write(handle, args->service, args->characteristic,
+						args->command, args->length, 10000,
+						args->callback);
+				break;
+			case NimbleCallbackReason::UNKNOWN:
+				ESP_LOGI(tag, "Yobarenai hazu");
+				break;
+		}
 		return 0;
 	};
-
-	args->connecting = [](uint16_t handle, void *args) {
-		ESP_LOGI(tag, "start connecting");
-		callback_args_t *arg = (callback_args_t *)args;
-		arg->central->connect(arg->address, arg->writing, args);
-		return 0;
-	};
-
-	args->writing = [](uint16_t handle, void *args) {
-		ESP_LOGI(tag, "connected, start write");
-		callback_args_t *arg = (callback_args_t *)args;
-		arg->central->write(handle, arg->service, arg->characteristic, arg->command, arg->length, 10000,
-						arg->disconnecting, nullptr, args);
-		return 0;
-	};
-
-	args->connecting(0, args);
+	
+	args->central->connect(args->address, args->callback);
 
 	return 0;
 }
-*/
 
 bool SwitchBotClient::send_async(const uint8_t *command, size_t length) {
 	static callback_args_t *args = nullptr;
