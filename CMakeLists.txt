@@ -6,7 +6,7 @@ file(GLOB SRCS
 	src/*.c
      )
 set(COMPONENT_SRCS ${SRCS})
-set(COMPONENT_REQUIRES nvs_flash bt)
+set(COMPONENT_REQUIRES nvs_flash bt simple-nimble-central)
 
 
 register_component()

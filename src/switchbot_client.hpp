@@ -2,16 +2,18 @@
 
 #include <nimble/ble.h>
 #include <host/ble_uuid.h>
-#include "nimble_central.hpp"
+#include <simple_nimble_central.hpp>
 
 class SwitchBotClient {
-private:
-	static bool is_nimble_started;
-	static void nimble_start();
+private:	
+	static const ble_uuid128_t service, characteristic;
+	static const uint8_t command_press[3];
+	static const uint8_t command_push[3];
+	static const uint8_t command_pull[3];
 
 	ble_addr_t address;
 
-	NimbleCentral * central;
+	SimpleNimbleCentral * central;
 	
 
 	int send(const uint8_t * command, size_t length);
@@ -24,12 +26,7 @@ public:
 
 	bool press_async();
 	bool push_async();
-	bool pull_async();	
-	
-	static const ble_uuid128_t service, characteristic;
-	static const uint8_t command_press[3];
-	static const uint8_t command_push[3];
-	static const uint8_t command_pull[3];
+	bool pull_async();
 };
 
 inline int SwitchBotClient::press() { return send(command_press, sizeof(command_press)); }
